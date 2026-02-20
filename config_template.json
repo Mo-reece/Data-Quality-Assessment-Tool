@@ -1,0 +1,36 @@
+{
+  "missing_threshold": 0.05,
+  "duplicate_subset": null,
+  "outlier_method": "iqr",
+  "outlier_iqr_factor": 1.5,
+  "outlier_zscore_threshold": 3.0,
+  "high_cardinality_threshold": 0.9,
+  "low_cardinality_threshold": 10,
+  "string_patterns": {
+    "email": "[^@]+@[^@]+\\.[^@]+"
+  },
+  "expected_dtypes": {
+    "order_id": "int64"
+  },
+  "range_rules": {
+    "quantity": {"min": 1, "max": 100},
+    "unit_price": {"min": 0, "max": 10000}
+  },
+  "date_columns": ["order_date"],
+  "date_format": "%Y-%m-%d",
+  "reference_rules": [],
+  "severity_weights": {
+    "missing_values": 0.20,
+    "duplicates": 0.10,
+    "dtype_validation": 0.10,
+    "outliers": 0.10,
+    "cardinality": 0.05,
+    "string_patterns": 0.10,
+    "referential_integrity": 0.15,
+    "statistical_distribution": 0.05,
+    "date_validation": 0.10,
+    "range_validation": 0.05
+  },
+  "enabled_checks": null,
+  "report_title": "Data Quality Report"
+}

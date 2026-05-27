@@ -123,6 +123,16 @@ Copy `config_template.json` and edit to match your dataset. Key options:
 
 CSV, TSV, Excel (.xlsx/.xls), Parquet, JSON — auto-detected from file extension.
 
+## Testing
+
+Run the regression test suite before changing the CLI or package layout:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The GitHub Actions workflow in `.github/workflows/python-tests.yml` runs the same command on pull requests and pushes to `main`.
+
 ## Requirements
 
 - Python 3.10+

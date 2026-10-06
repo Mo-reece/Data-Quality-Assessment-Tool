@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-quality-assessment"
+version = "2.0.0"
+description = "Profile, validate, and score tabular data; HTML and JSON reports; CI quality gates."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Moreece" }]
+requires-python = ">=3.10"
+dependencies = ["pandas>=2.0", "numpy>=1.23"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+[project.optional-dependencies]
+excel = ["openpyxl>=3.1"]
+parquet = ["pyarrow>=12"]
+all = ["openpyxl>=3.1", "pyarrow>=12"]
+
+[project.urls]
+Homepage = "https://github.com/Mo-reece/Data-Quality-Assessment-Tool"
+
+[project.scripts]
+data-quality = "data_quality.cli:main"
+
+[tool.setuptools]
+packages = ["data_quality"]

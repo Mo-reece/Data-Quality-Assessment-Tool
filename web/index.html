@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Quality Check</title>
+<meta name="description" content="Score a CSV, Excel, JSON or Parquet file for missing values, duplicates, bad formats, out-of-range numbers, invalid dates and orphaned keys. Runs in your browser; files are never uploaded.">
+<meta property="og:title" content="Data Quality Check">
+<meta property="og:description" content="Profile and score a dataset in your browser. Files never leave your machine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f5bea'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="./"><span class="logo" aria-hidden="true"></span>Data Quality Check</a>
+    <nav>
+      <a href="https://github.com/Mo-reece/Data-Quality-Assessment-Tool">Python package &amp; CLI</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="intro">
+    <h1>Check a dataset before you trust it.</h1>
+    <p>Missing values, duplicate rows and keys, malformed e-mails, impossible dates, out-of-range numbers,
+      outliers and orphaned foreign keys — scored and explained. Everything runs in this browser tab;
+      your file is never uploaded.</p>
+  </section>
+
+  <!-- 1. Load -->
+  <section class="panel" id="step-load">
+    <h2><span class="num">1</span> Choose a file</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json,.jsonl,.parquet">
+      <strong>Drop a file here or click to browse</strong>
+      <span>CSV, TSV, Excel, JSON, JSONL or Parquet</span>
+    </label>
+    <div class="row">
+      <button type="button" class="link" id="sample">Or try a sample orders file with known problems</button>
+      <span class="status" id="engine-status" role="status">Starting the Python engine…</span>
+    </div>
+    <p class="file-info" id="file-info" hidden></p>
+  </section>
+
+  <!-- 2. Rules -->
+  <section class="panel" id="step-rules" hidden>
+    <div class="panel-head">
+      <h2><span class="num">2</span> Set the rules</h2>
+      <div class="actions">
+        <label class="btn ghost small">Import rules<input type="file" id="rules-import" accept=".json" hidden></label>
+        <button type="button" class="btn ghost small" id="rules-export">Export rules</button>
+      </div>
+    </div>
+    <p class="hint">Starter rules were suggested from your column names and values — review them. The exported
+      file works unchanged with the command-line tool (<code>data-quality data.csv -c rules.json</code>).</p>
+
+    <div class="table-wrap">
+      <table class="rules" id="rules-table">
+        <thead><tr>
+          <th>Column</th><th>Type</th>
+          <th title="No missing values allowed">Required</th>
+          <th title="Every value must be different">Unique</th>
+          <th title="Validate as a date">Date</th>
+          <th>Format</th><th>Min</th><th>Max</th><th>Must exist in</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="settings">
+      <label>Flag columns missing more than
+        <span class="inline"><input type="number" id="missing" min="0" max="100" step="1"> %</span></label>
+      <label>Date format
+        <select id="date-format">
+          <option value="">Detect automatically</option>
+          <option value="%Y-%m-%d">YYYY-MM-DD</option>
+          <option value="%d/%m/%Y">DD/MM/YYYY</option>
+          <option value="%m/%d/%Y">MM/DD/YYYY</option>
+          <option value="%Y-%m-%d %H:%M:%S">YYYY-MM-DD HH:MM:SS</option>
+        </select></label>
+      <label class="toggle"><input type="checkbox" id="future"> Allow future dates</label>
+      <label>Outliers
+        <select id="outlier">
+          <option value="iqr">IQR (robust, default)</option>
+          <option value="zscore">Z-score</option>
+        </select></label>
+    </div>
+
+    <div class="refs">
+      <label class="btn ghost small">Add a reference table<input type="file" id="ref-file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json,.jsonl,.parquet" hidden></label>
+      <span class="hint" id="ref-list">Optional: add e.g. a customers file to check that every order's customer exists.</span>
+    </div>
+
+    <details class="advanced">
+      <summary>Edit rules as JSON</summary>
+      <textarea id="json" spellcheck="false" rows="14"></textarea>
+      <div class="row"><button type="button" class="btn ghost small" id="json-apply">Apply JSON</button>
+        <span class="error" id="json-error" role="alert"></span></div>
+    </details>
+
+    <div class="row run-row">
+      <button type="button" class="btn" id="run">Run quality check</button>
+      <span class="error" id="run-error" role="alert"></span>
+    </div>
+  </section>
+
+  <!-- 3. Results -->
+  <section class="panel" id="step-results" hidden>
+    <div class="panel-head">
+      <h2><span class="num">3</span> Results</h2>
+      <div class="actions">
+        <button type="button" class="btn ghost small" id="dl-html">Download HTML report</button>
+        <button type="button" class="btn ghost small" id="dl-json">Download JSON</button>
+      </div>
+    </div>
+    <div class="summary" id="summary"></div>
+    <h3 class="sub">Findings</h3>
+    <div id="findings"></div>
+    <h3 class="sub">Column profile</h3>
+    <div class="table-wrap"><table class="profile" id="profile">
+      <thead><tr><th>Column</th><th>Type</th><th>Missing</th><th>Distinct</th><th>Range</th><th>Most common</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+</main>
+
+<footer class="wrap site-foot">
+  Open source · <a href="https://github.com/Mo-reece/Data-Quality-Assessment-Tool">GitHub</a> ·
+  Built by <a href="https://github.com/Mo-reece">Moreece</a> · Python runs locally via Pyodide.
+</footer>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>

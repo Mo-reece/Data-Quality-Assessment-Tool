@@ -17,3 +17,6 @@ reports/
 *.tmp
 .DS_Store
 Thumbs.db
+web/py/
+web/samples/
+.vercel/

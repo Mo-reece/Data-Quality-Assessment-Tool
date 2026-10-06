@@ -1,0 +1,15 @@
+{
+  "report_title": "Orders data quality",
+  "not_null_columns": ["order_id", "customer_id", "order_date"],
+  "unique_columns": ["order_id"],
+  "string_patterns": { "email": "[^@\\s]+@[^@\\s]+\\.[A-Za-z]{2,}" },
+  "range_rules": {
+    "quantity": { "min": 1, "max": 100 },
+    "unit_price": { "min": 0, "max": 10000 }
+  },
+  "date_columns": ["order_date"],
+  "date_format": "%Y-%m-%d",
+  "reference_rules": [
+    { "child_col": "customer_id", "parent_df": "customers", "parent_col": "customer_id" }
+  ]
+}

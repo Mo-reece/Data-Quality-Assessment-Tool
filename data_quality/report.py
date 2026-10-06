@@ -1,270 +1,214 @@
 """
-Reporting module — generates styled HTML reports and console summaries.
+Reporting — a self-contained HTML report and a console summary.
 
-Uses only the Python standard library plus matplotlib for chart
-generation (base64-encoded PNGs embedded directly in the HTML).
+The HTML report has no external assets and no plotting dependency: charts
+are inline SVG/CSS, so a report can be e-mailed, attached to a ticket, or
+archived and still render.  Every value that comes from the data (column
+names, sample values, file names) is HTML-escaped.
 """
 
 from __future__ import annotations
 
-import base64
-import io
-from datetime import datetime
+from html import escape
 from pathlib import Path
-from typing import Any
 
-import matplotlib
-matplotlib.use("Agg")  # non-interactive backend
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-
+from data_quality import __version__
+from data_quality.checks import CheckResult
 from data_quality.engine import QualityAssessment
 
-
-# ── Colour palette ────────────────────────────────────────────────────
-
-_COLORS = {
-    "critical": "#e74c3c",
-    "warning": "#f39c12",
-    "info": "#27ae60",
-    "bg": "#f8f9fa",
-    "card": "#ffffff",
-    "text": "#2c3e50",
-    "border": "#dee2e6",
-    "primary": "#3498db",
-    "gauge_bg": "#ecf0f1",
-}
+_SEV_LABEL = {"info": "Pass", "warning": "Warning", "critical": "Critical"}
 
 
-# ── Chart helpers ─────────────────────────────────────────────────────
-
-def _fig_to_base64(fig: plt.Figure) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode()
+def _e(value: object) -> str:
+    return escape(str(value), quote=True)
 
 
-def _score_gauge_chart(score: float) -> str:
-    """Render a semi-circle gauge for the composite score."""
-    fig, ax = plt.subplots(figsize=(4, 2.4), subplot_kw={"projection": "polar"})
-    ax.set_theta_offset(3.14159)
-    ax.set_theta_direction(-1)
-    ax.set_rlim(0, 1)
-
-    # Background arc
-    theta_bg = [i * 3.14159 / 100 for i in range(101)]
-    ax.fill_between(theta_bg, 0.6, 1.0, color=_COLORS["gauge_bg"], alpha=0.5)
-
-    # Score arc
-    theta_score = [i * 3.14159 / 100 for i in range(int(score * 100) + 1)]
-    color = _COLORS["info"] if score >= 0.8 else _COLORS["warning"] if score >= 0.6 else _COLORS["critical"]
-    ax.fill_between(theta_score, 0.6, 1.0, color=color, alpha=0.8)
-
-    ax.set_axis_off()
-    ax.text(0, 0, f"{score:.0%}", ha="center", va="center", fontsize=28, fontweight="bold", color=color)
-
-    return _fig_to_base64(fig)
+def _title(name: str) -> str:
+    return name.replace("_", " ").capitalize()
 
 
-def _check_scores_bar(assessment: QualityAssessment) -> str:
-    """Horizontal bar chart showing each check's score."""
-    names = [r.name.replace("_", " ").title() for r in assessment.results]
-    scores = [r.score for r in assessment.results]
-    colors = [
-        _COLORS["info"] if s >= 0.95 else _COLORS["warning"] if s >= 0.7 else _COLORS["critical"]
-        for s in scores
-    ]
-
-    fig, ax = plt.subplots(figsize=(7, max(2.5, len(names) * 0.45)))
-    bars = ax.barh(names, scores, color=colors, edgecolor="white", height=0.6)
-    ax.set_xlim(0, 1.05)
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(1.0))
-    ax.invert_yaxis()
-    ax.set_xlabel("Score")
-    ax.spines[["top", "right"]].set_visible(False)
-
-    for bar, s in zip(bars, scores):
-        ax.text(s + 0.01, bar.get_y() + bar.get_height() / 2, f"{s:.0%}",
-                va="center", fontsize=9)
-
-    fig.tight_layout()
-    return _fig_to_base64(fig)
+def _tone(score: float) -> str:
+    return "good" if score >= 0.95 else "warn" if score >= 0.70 else "bad"
 
 
-def _severity_pie(assessment: QualityAssessment) -> str:
-    """Pie chart of check severity counts."""
-    counts = {"info": 0, "warning": 0, "critical": 0}
-    for r in assessment.results:
-        counts[r.severity] += 1
-
-    labels = [k.title() for k, v in counts.items() if v > 0]
-    sizes = [v for v in counts.values() if v > 0]
-    colors = [_COLORS[k] for k, v in counts.items() if v > 0]
-
-    fig, ax = plt.subplots(figsize=(3.5, 3.5))
-    ax.pie(sizes, labels=labels, colors=colors, autopct="%1.0f%%",
-           startangle=90, textprops={"fontsize": 10})
-    fig.tight_layout()
-    return _fig_to_base64(fig)
+def _gauge(score: float, grade: str) -> str:
+    r = 52
+    circ = 2 * 3.14159 * r
+    dash = circ * score
+    return f"""<svg class="gauge {_tone(score)}" viewBox="0 0 120 120" role="img"
+  aria-label="Composite score {score:.0%}, grade {grade}">
+  <circle cx="60" cy="60" r="{r}" class="track"/>
+  <circle cx="60" cy="60" r="{r}" class="arc" stroke-dasharray="{dash:.1f} {circ:.1f}"
+    transform="rotate(-90 60 60)"/>
+  <text x="60" y="58" class="pct">{score:.0%}</text>
+  <text x="60" y="80" class="grade">Grade {grade}</text>
+</svg>"""
 
 
-# ── HTML builder ──────────────────────────────────────────────────────
+def _score_bars(results: list[CheckResult]) -> str:
+    rows = []
+    for r in results:
+        if r.skipped:
+            rows.append(f'<div class="bar-row skipped"><span>{_e(_title(r.name))}</span>'
+                        f'<div class="bar"></div><b>skipped</b></div>')
+        else:
+            rows.append(
+                f'<div class="bar-row"><span>{_e(_title(r.name))}</span>'
+                f'<div class="bar"><i class="{_tone(r.score)}" style="width:{r.score * 100:.1f}%"></i></div>'
+                f'<b>{r.score:.0%}</b></div>'
+            )
+    return "\n".join(rows)
 
-def _severity_badge(sev: str) -> str:
-    color = _COLORS.get(sev, _COLORS["text"])
-    return f'<span style="background:{color};color:#fff;padding:2px 10px;border-radius:12px;font-size:0.85em;">{sev.upper()}</span>'
 
-
-def _build_check_card(r: Any) -> str:
-    status_icon = "&#10004;" if r.passed else "&#10008;"
-    status_color = _COLORS["info"] if r.passed else _COLORS["critical"]
-    recs_html = ""
+def _check_card(r: CheckResult) -> str:
+    if r.skipped:
+        status, tone = "Skipped", "muted"
+    else:
+        status, tone = _SEV_LABEL.get(r.severity, r.severity), _tone(r.score) if not r.passed else "good"
+        if r.passed:
+            status = "Pass"
+    recs = ""
     if r.recommendations:
-        recs_items = "".join(f"<li>{rec}</li>" for rec in r.recommendations)
-        recs_html = f'<div style="margin-top:8px;"><strong>Recommendations:</strong><ul style="margin:4px 0 0 16px;">{recs_items}</ul></div>'
+        recs = "<ul>" + "".join(f"<li>{_e(x)}</li>" for x in r.recommendations) + "</ul>"
+    score = "" if r.skipped else f'<span class="score">{r.score:.0%}</span>'
+    return f"""<article class="check {tone}">
+  <header><h3>{_e(_title(r.name))}</h3><div><span class="pill {tone}">{status}</span>{score}</div></header>
+  <p>{_e(r.summary)}</p>{recs}
+</article>"""
 
-    return f"""
-    <div style="background:{_COLORS['card']};border:1px solid {_COLORS['border']};border-left:4px solid {_COLORS.get(r.severity, _COLORS['border'])};border-radius:6px;padding:16px;margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="margin:0;color:{_COLORS['text']};">
-                <span style="color:{status_color};margin-right:6px;">{status_icon}</span>
-                {r.name.replace('_', ' ').title()}
-            </h3>
-            <div>{_severity_badge(r.severity)} <span style="margin-left:8px;font-weight:bold;">{r.score:.0%}</span></div>
-        </div>
-        <p style="margin:8px 0 0;color:#555;">{r.summary}</p>
-        {recs_html}
-    </div>"""
+
+def _profile_table(assessment: QualityAssessment) -> str:
+    rows = []
+    for c in assessment.column_profile:
+        rng = ""
+        if "min" in c:
+            rng = f"{_e(c['min'])} – {_e(c['max'])}"
+        top = ", ".join(f"{_e(t['value'])} ({t['count']:,})" for t in c.get("top_values", []))
+        miss_tone = "bad" if c["missing_pct"] > assessment.config.missing_threshold else ""
+        rows.append(
+            f"<tr><td><b>{_e(c['column'])}</b></td><td><code>{_e(c['dtype'])}</code></td>"
+            f'<td class="num {miss_tone}">{c["missing_pct"]:.1%}</td>'
+            f'<td class="num">{c["unique"]:,}</td><td>{rng}</td><td class="top">{top}</td></tr>'
+        )
+    return "\n".join(rows)
+
+
+_CSS = """
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#667085;--line:#e4e7ec;
+--good:#12805c;--warn:#b54708;--bad:#c4320a;--track:#eaecf0;--accent:#2f5bea}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#171b23;--text:#e6e8ec;--muted:#98a2b3;
+--line:#2a303b;--good:#3ccb8f;--warn:#f5a524;--bad:#f97066;--track:#2a303b;--accent:#7b9bff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:32px 16px 48px}
+h1{font-size:1.6rem;margin:0 0 4px}h2{font-size:1.1rem;margin:36px 0 12px}
+.meta{color:var(--muted);font-size:.875rem;margin:0}
+.top-grid{display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center;
+background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:20px}
+.gauge{width:150px;height:150px}.gauge .track{fill:none;stroke:var(--track);stroke-width:12}
+.gauge .arc{fill:none;stroke-width:12;stroke-linecap:round}
+.gauge.good .arc{stroke:var(--good)}.gauge.warn .arc{stroke:var(--warn)}.gauge.bad .arc{stroke:var(--bad)}
+.gauge .pct{font-size:26px;font-weight:700;text-anchor:middle;fill:var(--text)}
+.gauge .grade{font-size:11px;text-anchor:middle;fill:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
+.stat b{display:block;font-size:1.4rem}.stat span{color:var(--muted);font-size:.8rem}
+.bars{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px}
+.bar-row{display:grid;grid-template-columns:200px 1fr 64px;gap:12px;align-items:center;padding:5px 0;font-size:.875rem}
+.bar-row b{text-align:right;font-variant-numeric:tabular-nums}.bar-row.skipped{color:var(--muted)}
+.bar{height:10px;background:var(--track);border-radius:5px;overflow:hidden}.bar i{display:block;height:100%}
+i.good{background:var(--good)}i.warn{background:var(--warn)}i.bad{background:var(--bad)}
+.check{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);
+border-radius:10px;padding:14px 18px;margin-bottom:10px}
+.check.good{border-left-color:var(--good)}.check.warn{border-left-color:var(--warn)}.check.bad{border-left-color:var(--bad)}
+.check header{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.check h3{margin:0;font-size:1rem}.check p{margin:6px 0 0;color:var(--muted)}
+.check ul{margin:8px 0 0;padding-left:20px}.check li{margin:2px 0}
+.pill{font-size:.75rem;font-weight:600;padding:2px 10px;border-radius:999px;border:1px solid currentColor}
+.pill.good{color:var(--good)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}.pill.muted{color:var(--muted)}
+.score{margin-left:10px;font-weight:700;font-variant-numeric:tabular-nums}
+.table-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;white-space:nowrap}td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.bad{color:var(--bad);font-weight:600}td.top{color:var(--muted);max-width:320px}
+code{font-size:.8rem}footer{color:var(--muted);font-size:.8rem;margin-top:32px}
+@media (max-width:640px){.top-grid{grid-template-columns:1fr;justify-items:center}
+.bar-row{grid-template-columns:120px 1fr 48px}}
+@media print{body{background:#fff}.check,.bars,.top-grid,.table-wrap{break-inside:avoid}}
+"""
 
 
 def generate_html_report(assessment: QualityAssessment, output_path: str | Path | None = None) -> str:
-    """Build a self-contained HTML quality report.
-
-    Parameters
-    ----------
-    assessment : QualityAssessment
-        Output of ``DataQualityEngine.run()``.
-    output_path : str or Path, optional
-        If given, the HTML is also written to this file.
-
-    Returns
-    -------
-    str
-        The full HTML document as a string.
-    """
-    gauge_b64 = _score_gauge_chart(assessment.composite_score)
-    bar_b64 = _check_scores_bar(assessment)
-    pie_b64 = _severity_pie(assessment)
-
-    check_cards = "\n".join(_build_check_card(r) for r in assessment.results)
-
-    summary = assessment.summary_dict()
-
-    dtype_rows = "".join(
-        f"<tr><td>{col}</td><td><code>{dt}</code></td></tr>"
-        for col, dt in assessment.dtypes.items()
-    )
+    """Build a self-contained HTML report; optionally write it to ``output_path``."""
+    s = assessment.summary_dict()
+    ordered = sorted(assessment.results, key=lambda r: (r.skipped, r.passed, r.score))
+    title = assessment.config.report_title
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{assessment.config.report_title}</title>
-<style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-           background: {_COLORS['bg']}; color: {_COLORS['text']}; line-height: 1.6; padding: 24px; }}
-    .container {{ max-width: 960px; margin: 0 auto; }}
-    h1 {{ font-size: 1.8em; margin-bottom: 4px; }}
-    h2 {{ font-size: 1.3em; margin: 28px 0 12px; border-bottom: 2px solid {_COLORS['primary']}; padding-bottom: 4px; }}
-    .meta {{ color: #888; font-size: 0.9em; margin-bottom: 20px; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }}
-    .stat-card {{ background: {_COLORS['card']}; border: 1px solid {_COLORS['border']};
-                  border-radius: 8px; padding: 16px; text-align: center; }}
-    .stat-card .value {{ font-size: 1.8em; font-weight: bold; color: {_COLORS['primary']}; }}
-    .stat-card .label {{ font-size: 0.85em; color: #888; }}
-    .chart-row {{ display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }}
-    .chart-row img {{ max-width: 100%; height: auto; }}
-    table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px;
-             background: {_COLORS['card']}; border-radius: 6px; overflow: hidden; }}
-    th, td {{ padding: 8px 12px; text-align: left; border-bottom: 1px solid {_COLORS['border']}; font-size: 0.9em; }}
-    th {{ background: {_COLORS['primary']}; color: #fff; }}
-    footer {{ text-align: center; color: #aaa; font-size: 0.8em; margin-top: 32px; }}
-</style>
+<title>{_e(title)} — {_e(assessment.dataset_name)}</title>
+<style>{_CSS}</style>
 </head>
 <body>
-<div class="container">
+<main class="wrap">
+<h1>{_e(title)}</h1>
+<p class="meta">Dataset <b>{_e(assessment.dataset_name)}</b> · generated {_e(assessment.generated_at)}
+ · {assessment.elapsed_seconds:.2f}s · {assessment.memory_usage_mb:.1f} MB in memory</p>
 
-<h1>{assessment.config.report_title}</h1>
-<p class="meta">Dataset: <strong>{assessment.dataset_name}</strong> &middot;
-   Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &middot;
-   Elapsed: {assessment.elapsed_seconds:.2f}s &middot;
-   Memory: {assessment.memory_usage_mb:.1f} MB</p>
-
-<!-- ─── Summary stats ─────────────────────────────── -->
-<div class="grid">
-    <div class="stat-card"><div class="value">{summary['rows']:,}</div><div class="label">Rows</div></div>
-    <div class="stat-card"><div class="value">{summary['columns']}</div><div class="label">Columns</div></div>
-    <div class="stat-card"><div class="value">{summary['checks_passed']}/{summary['checks_run']}</div><div class="label">Checks Passed</div></div>
-    <div class="stat-card"><div class="value" style="color:{_COLORS['critical'] if summary['critical'] else _COLORS['info']};">{summary['critical']}</div><div class="label">Critical Issues</div></div>
+<section class="top-grid">
+{_gauge(assessment.composite_score, assessment.grade)}
+<div class="stats">
+  <div class="stat"><b>{s['rows']:,}</b><span>Rows</span></div>
+  <div class="stat"><b>{s['columns']:,}</b><span>Columns</span></div>
+  <div class="stat"><b>{s['checks_passed']}/{s['checks_run']}</b><span>Checks passed</span></div>
+  <div class="stat"><b>{s['critical']}</b><span>Critical</span></div>
+  <div class="stat"><b>{s['warnings']}</b><span>Warnings</span></div>
+  <div class="stat"><b>{s['checks_skipped']}</b><span>Skipped (no rules)</span></div>
 </div>
+</section>
 
-<!-- ─── Charts ────────────────────────────────────── -->
-<h2>Quality Score</h2>
-<div class="chart-row">
-    <img src="data:image/png;base64,{gauge_b64}" alt="Quality gauge" style="max-width:280px;">
-    <img src="data:image/png;base64,{pie_b64}" alt="Severity breakdown" style="max-width:260px;">
-</div>
+<h2>Check scores</h2>
+<div class="bars">{_score_bars(assessment.results)}</div>
 
-<h2>Check Scores</h2>
-<div style="text-align:center;margin-bottom:20px;">
-    <img src="data:image/png;base64,{bar_b64}" alt="Check scores" style="max-width:700px;">
-</div>
+<h2>Findings</h2>
+{"".join(_check_card(r) for r in ordered)}
 
-<!-- ─── Detailed check results ────────────────────── -->
-<h2>Detailed Results</h2>
-{check_cards}
+<h2>Column profile</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Column</th><th>Type</th><th>Missing</th><th>Distinct</th><th>Range</th><th>Most common</th></tr></thead>
+<tbody>{_profile_table(assessment)}</tbody>
+</table></div>
 
-<!-- ─── Column types ──────────────────────────────── -->
-<h2>Column Data Types</h2>
-<table>
-<thead><tr><th>Column</th><th>Dtype</th></tr></thead>
-<tbody>{dtype_rows}</tbody>
-</table>
-
-<footer>Data Quality Assessment Tool v1.0.0 &mdash; generated automatically</footer>
-</div>
+<footer>Data Quality Assessment Tool v{__version__}. Skipped checks are excluded from the composite score.</footer>
+</main>
 </body>
 </html>"""
 
     if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(html, encoding="utf-8")
-
     return html
 
 
 def print_console_summary(assessment: QualityAssessment) -> None:
-    """Print a compact, coloured summary to stdout."""
+    """Print a compact text summary to stdout."""
     s = assessment.summary_dict()
-    print("\n" + "=" * 60)
-    print(f"  DATA QUALITY REPORT: {s['dataset']}")
-    print("=" * 60)
+    line = "=" * 64
+    print(f"\n{line}\n  DATA QUALITY: {s['dataset']}\n{line}")
     print(f"  Rows: {s['rows']:,}  |  Columns: {s['columns']}")
-    print(f"  Composite Score: {assessment.composite_score:.1%}")
-    print(f"  Checks Passed: {s['checks_passed']}/{s['checks_run']}")
-    print(f"  Critical: {s['critical']}  |  Warnings: {s['warnings']}")
-    print("-" * 60)
-
+    print(f"  Score: {assessment.composite_score:.1%}  (grade {s['grade']})")
+    print(f"  Passed: {s['checks_passed']}/{s['checks_run']}  |  Critical: {s['critical']}"
+          f"  |  Warnings: {s['warnings']}  |  Skipped: {s['checks_skipped']}")
+    print("-" * 64)
     for r in assessment.results:
-        icon = "[PASS]" if r.passed else "[FAIL]"
-        print(f"  {icon} {r.name:<28s}  {r.score:>6.1%}  {r.severity.upper()}")
-        if r.recommendations:
-            for rec in r.recommendations:
-                print(f"         -> {rec}")
-
-    print("=" * 60)
-    print(f"  Elapsed: {assessment.elapsed_seconds:.2f}s  |  Memory: {assessment.memory_usage_mb:.1f} MB")
-    print("=" * 60 + "\n")
+        if r.skipped:
+            print(f"  [SKIP] {r.name:<26s}  {r.summary}")
+            continue
+        tag = "[PASS]" if r.passed else "[FAIL]"
+        print(f"  {tag} {r.name:<26s} {r.score:>6.1%}  {r.severity.upper()}")
+        for rec in r.recommendations:
+            print(f"         -> {rec}")
+    print(f"{line}\n")

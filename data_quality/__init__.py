@@ -1,18 +1,35 @@
 """
 Data Quality Assessment Tool
-=============================
-A modular, production-ready toolkit for automated data quality profiling,
-validation, and reporting.
+============================
+Profile, validate, and score tabular data; produce HTML and JSON reports.
+
+    >>> from data_quality import assess, load_table
+    >>> result = assess(load_table("orders.csv"), {"unique_columns": ["order_id"]})
+    >>> result.composite_score, result.grade
 
 Modules:
-    checks  - Individual data quality check functions
-    engine  - Orchestration engine that runs checks and aggregates results
-    report  - HTML/console report generation with visualizations
-    config  - Configuration loading and validation
+    checks  - individual check functions
+    engine  - orchestration, scoring, and column profiling
+    config  - validated, JSON-serialisable rules
+    io      - file loading (CSV, TSV, Excel, Parquet, JSON)
+    suggest - starter rules inferred from a dataset
+    report  - self-contained HTML report and console summary
 """
 
-from data_quality.engine import DataQualityEngine
-from data_quality.config import QualityConfig
+__version__ = "2.0.0"
 
-__version__ = "1.0.0"
-__all__ = ["DataQualityEngine", "QualityConfig"]
+from data_quality.config import ConfigError, QualityConfig  # noqa: E402
+from data_quality.engine import DataQualityEngine, QualityAssessment, assess  # noqa: E402
+from data_quality.io import load_table  # noqa: E402
+from data_quality.suggest import suggest_config  # noqa: E402
+
+__all__ = [
+    "ConfigError",
+    "DataQualityEngine",
+    "QualityAssessment",
+    "QualityConfig",
+    "assess",
+    "load_table",
+    "suggest_config",
+    "__version__",
+]

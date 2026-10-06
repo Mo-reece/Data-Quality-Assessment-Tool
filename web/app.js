@@ -3,7 +3,7 @@
 const $ = (sel) => document.querySelector(sel);
 
 // ── Worker RPC ───────────────────────────────────────────────────────
-const worker = new Worker("worker.js", { type: "module" });
+const worker = new Worker("worker.js?v=2.0.0", { type: "module" });
 worker.onerror = (e) => {
   for (const p of pending.values()) p.reject(new Error(e.message || "The analysis engine stopped unexpectedly."));
   pending.clear();

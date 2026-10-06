@@ -20,3 +20,6 @@ Thumbs.db
 web/py/
 web/samples/
 .vercel/
+
+.vercel
+.env*
